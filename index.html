@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Graph Analysis Results</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .navigation {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+        .button {
+            padding: 10px 15px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .button:disabled {
+            background-color: #ccc;
+        }
+    </style>
+</head>
+<body>
+    <h1>Graph Analysis Results</h1>
+    <div class="navigation">
+        <button id="prev-layer" class="button">Previous Layer</button>
+        <h2 id="current-layer">Layer: conv2d</h2>
+        <button id="next-layer" class="button">Next Layer</button>
+    </div>
+    <div class="navigation">
+        <button id="prev-material" class="button">Previous Material</button>
+        <h2 id="current-material">Material: Material 1</h2>
+        <button id="next-material" class="button">Next Material</button>
+    </div>
+    <div id="content">
+        <!-- Table content will be dynamically inserted here -->
+    </div>
+    <script>
+        let data = {}; // Will hold the parsed JSON data
+        let currentLayerIndex = 0;
+        let currentMaterial = 0;
+        const layers = [
+            "conv2d",
+            "max_pooling2d",
+            "conv2d_1",
+            "max_pooling2d_1",
+            "flatten",
+            "dense",
+            "dense_1"
+        ];
+        const materials = ["initial_SCCs", "SCCs_with_cross_class_edges_removed", "impure_subgraphs", "purity_of_images_through_layers"];
+
+        // Load JSON data
+        fetch("tabular_output/all_materials.json")
+            .then(response => response.json())
+            .then(json => {
+                data = json;
+                renderContent();
+            })
+            .catch(err => {
+                document.getElementById("content").innerHTML = `<p style="color:red;">Error loading data: ${err}</p>`;
+            });
+
+        // Update the displayed content
+        function renderContent() {
+            const layerData = data[layers[currentLayerIndex]];
+            const materialKey = materials[currentMaterial];
+            const contentDiv = document.getElementById("content");
+            const layerTitle = document.getElementById("current-layer");
+            const materialTitle = document.getElementById("current-material");
+
+            if (!layerData || !layerData[materialKey]) {
+                contentDiv.innerHTML = "<p>No data available for this layer and material.</p>";
+                return;
+            }
+
+            layerTitle.textContent = `Layer: ${layers[currentLayerIndex]}`;
+            materialTitle.textContent = `Material: ${materialKey.replace('_', ' ').toUpperCase()}`;
+
+            const materialData = layerData[materialKey];
+            let html = "";
+
+            // Render content based on material
+            if (materialKey === "SCCs_with_cross_class_edges_removed") {
+                html += `<h3>SCCs</h3><table><tr><th>SCC Index</th><th>Size</th><th>Composition</th></tr>`;
+                materialData.sccs.forEach(scc => {
+                    html += `<tr><td>${scc.scc_index}</td><td>${scc.size}</td><td>${JSON.stringify(scc.composition)}</td></tr>`;
+                });
+                html += `</table><h3>Impurities</h3>`;
+                html += `<p>Impurity Nodes: ${materialData.impurities.impurity_nodes}</p>`;
+                html += `<p>Impurity Edges: ${materialData.impurities.impurity_edges}</p>`;
+                html += `<p>Composition: ${JSON.stringify(materialData.impurities.composition)}</p>`;
+            } else if (materialKey === "impure_subgraphs") {
+                html += `<h3>Subgraphs</h3><table><tr><th>Subgraph Index</th><th>Nodes</th><th>Composition</th><th>Same-Class Edges</th><th>Different-Class Edges</th><th>Misclassified Nodes</th></tr>`;
+                materialData.subgraphs.forEach(subgraph => {
+                    html += `<tr>
+                        <td>${subgraph.subgraph_index}</td>
+                        <td>${subgraph.num_nodes}</td>
+                        <td>${JSON.stringify(subgraph.class_composition)}</td>
+                        <td>${subgraph.same_class_edges}</td>
+                        <td>${subgraph.different_class_edges}</td>
+                        <td>${subgraph.misclassified_nodes}</td>
+                    </tr>`;
+                });
+                html += `</table><p>Total Misclassified Nodes: ${materialData.total_misclassified}</p>`;
+            } else if (materialKey === "initial_SCCs") {
+                html += `<h3>SCCs</h3><table><tr><th>SCC Index</th><th>Size</th><th>Label Counts</th></tr>`;
+                materialData.sccs.forEach(scc => {
+                    html += `<tr>
+                        <td>${scc.scc_index}</td>
+                        <td>${scc.size}</td>
+                        <td>${JSON.stringify(scc.label_counts)}</td>
+                    </tr>`;
+                });
+                html += `</table>`;
+            }
+            else if (materialKey === "purity_of_images_through_layers") {
+                // Rendering content for purity_of_images_through_layers
+                html += `<h3>Purity of Images Across Layers</h3>`;
+                html += `<p>Select a true label below to view the purity of images for each layer.</p>`;
+
+                // Create buttons for each true label (0-9)
+                for (let i = 0; i <= 9; i++) {
+                    html += `<button onclick="showPurityDetails(${i})">True Label ${i}</button> `;
+                }
+
+                // Add a container to display image data for selected true label
+                html += `<div id="image-data-container"></div>`;
+            }
+
+            contentDiv.innerHTML = html;
+        }
+
+        // Show purity details for a selected true label
+        function showPurityDetails(trueLabel) {
+            const imageDataContainer = document.getElementById("image-data-container");
+
+            // Create an empty object to hold the purity data for each image
+            let purityData = {};
+
+            // Iterate over the layers to collect the image data for each layer
+            layers.forEach(layer => {
+                const curLayerData = data[layer]?.purity_of_images_through_layers;
+
+                // Ensure that the current layer data exists
+                if (curLayerData && curLayerData.images) {
+                    // For each image in the current layer's purity data
+                    curLayerData.images.forEach(image => {
+                        // Check if the image_id already exists in purityData, if not, initialize it
+                        if (!purityData[image.image_id]) {
+                            purityData[image.image_id] = {};
+                        }
+
+                        // Add the layer-specific data for the image: true_label, predicted_label, and category
+                        purityData[image.image_id][layer] = {
+                            true_label: image.true_label,
+                            predicted_label: image.predicted_label,
+                            category: image.category
+                        };
+                    });
+                }
+            });
+
+            // Filter images that have the desired true_label
+            let filteredImages = [];
+            Object.keys(purityData).forEach(imageId => {
+                const image = purityData[imageId];
+                if (image && image[layers[0]] && image[layers[0]].true_label == trueLabel) {
+                    filteredImages.push(image);
+                }
+            });
+
+            // Sort filtered images by integer version of predicted_label
+            filteredImages.sort((a, b) => {
+                const predictedA = parseInt(a[layers[0]].predicted_label, 10);
+                const predictedB = parseInt(b[layers[0]].predicted_label, 10);
+                return predictedA - predictedB; // Sort numerically
+            });
+
+            // If no images match the true_label, show a message and return
+            if (filteredImages.length === 0) {
+                imageDataContainer.innerHTML = `<p>No images found with true_label: ${trueLabel}.</p>`;
+                return;
+            }
+
+            // Generate the table headers (layer names)
+            let html = "<h3>Purity Details for True Label: " + trueLabel + "</h3>";
+            html += `<table style="width: 100%; border-collapse: collapse;">`;
+            html += `<tr><th>True Label</th><th>Predicted Label</th>`;
+            layers.forEach(layer => {
+                html += `<th>${layer}</th>`;
+            });
+            html += `</tr>`;
+
+            // Generate rows for each filtered image
+            filteredImages.forEach(image => {
+                html += `<tr>`;
+                html += `<td>${image[layers[0]].true_label}</td>`;
+                html += `<td>${image[layers[0]].predicted_label}</td>`;
+
+                layers.forEach(layer => {
+                    let category = image[layer]?.category || "isolated"; // Default to "isolated" if no category exists
+                    let color = "";
+
+                    // Assign background colors based on category
+                    if (category === "impure") {
+                        color = "#FF6347"; // Red
+                    } else if (category === "pure") {
+                        color = "#32CD32"; // Green
+                    } else if (category === "isolated") {
+                        color = "#FFD700"; // Yellow
+                    }
+
+                    // Create the cell with the corresponding category and color
+                    html += `<td style="background-color: ${color}; color: white; text-align: center; padding: 10px;">
+                                ${category}
+                             </td>`;
+                });
+                html += `</tr>`;
+            });
+
+            html += `</table>`;
+
+            // Insert the generated table into the container
+            imageDataContainer.innerHTML = html;
+        }
+
+
+        // Navigation button handlers for layers
+        document.getElementById("prev-layer").addEventListener("click", () => {
+            if (currentLayerIndex > 0) {
+                currentLayerIndex--;
+                renderContent();
+            }
+        });
+
+        document.getElementById("next-layer").addEventListener("click", () => {
+            if (currentLayerIndex < layers.length - 1) {
+                currentLayerIndex++;
+                renderContent();
+            }
+        });
+
+        // Navigation button handlers for materials
+        document.getElementById("prev-material").addEventListener("click", () => {
+            if (currentMaterial > 0) {
+                currentMaterial--;
+                renderContent();
+            }
+        });
+
+        document.getElementById("next-material").addEventListener("click", () => {
+            if (currentMaterial < materials.length - 1) {
+                currentMaterial++;
+                renderContent();
+            }
+        });
+    </script>
+</body>
+</html>
